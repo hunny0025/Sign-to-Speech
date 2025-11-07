@@ -1,37 +1,35 @@
-# Install dependencies:
-# pip install mediapipe opencv-python pyttsx3
+# app.py
 
 import cv2
 import mediapipe as mp
-import pyttsx3
+import time
+import streamlit as st
+from gtts import gTTS
+import os
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# Initialize MediaPipe Hands
-mp_hands = mp.solutions.hands
-mp_draw = mp.solutions.drawing_utils
-hands = mp_hands.Hands(max_num_hands=1)
-engine = pyttsx3.init()
+# ---------------------
+# Speech function using gTTS
+# ---------------------
+def speak_text(text):
+    if text:
+        tts = gTTS(text=text, lang='en')
+        tts.save("speech.mp3")
+        audio_file = open("speech.mp3", "rb")
+        st.audio(audio_file, format="audio/mp3")
+        os.remove("speech.mp3")
 
-# Finger indices in MediaPipe
+# ---------------------
+# Gesture recognition setup
+# ---------------------
 FINGER_TIPS = [4, 8, 12, 16, 20]
+MAX_WORDS = 4
+sentence = []
+last_word = ""
+last_time = time.time()
+delay = 1
 
-# Define gestures based on finger positions (up or down)
-def fingers_up(hand_landmarks):
-    tips = [hand_landmarks.landmark[i] for i in FINGER_TIPS]
-    fingers = []
-    # Thumb
-    if tips[0].x < hand_landmarks.landmark[2].x:
-        fingers.append(1)
-    else:
-        fingers.append(0)
-    # Other fingers
-    for i in range(1,5):
-        if tips[i].y < hand_landmarks.landmark[i*4-2].y:
-            fingers.append(1)
-        else:
-            fingers.append(0)
-    return fingers  # list of 0 (down) or 1 (up)
-
-# Map finger patterns to words (20+ gestures)
+# Gesture mapping (20+ signs)
 GESTURES = {
     (0,1,0,0,0): "Hello",
     (1,1,1,1,1): "Yes",
@@ -57,31 +55,62 @@ GESTURES = {
     (1,1,0,0,1): "Come"
 }
 
-cap = cv2.VideoCapture(0)
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
+hands = mp_hands.Hands(max_num_hands=1)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(frame_rgb)
+# ---------------------
+# Helper: Detect fingers up
+# ---------------------
+def fingers_up(hand_landmarks):
+    tips = [hand_landmarks.landmark[i] for i in FINGER_TIPS]
+    fingers = []
+    # Thumb
+    fingers.append(1 if tips[0].x < hand_landmarks.landmark[2].x else 0)
+    # Other fingers
+    for i in range(1,5):
+        fingers.append(1 if tips[i].y < hand_landmarks.landmark[i*4-2].y else 0)
+    return fingers
 
-    gesture_text = ""
-    if results.multi_hand_landmarks:
-        for handLms in results.multi_hand_landmarks:
-            mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
-            fingers = tuple(fingers_up(handLms))
-            gesture_text = GESTURES.get(fingers, "")
-            if gesture_text:
-                engine.say(gesture_text)
-                engine.runAndWait()
+# ---------------------
+# Streamlit video transformer
+# ---------------------
+class SignSpeechTransformer(VideoTransformerBase):
+    def transform(self, frame):
+        global last_word, last_time, sentence
+        image = frame.to_ndarray(format="bgr24")
+        frame_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = hands.process(frame_rgb)
 
-    if gesture_text:
-        cv2.putText(frame, gesture_text, (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+        gesture_text = ""
+        if results.multi_hand_landmarks:
+            for handLms in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(image, handLms, mp_hands.HAND_CONNECTIONS)
+                fingers = tuple(fingers_up(handLms))
+                gesture_text = GESTURES.get(fingers, "")
 
-    cv2.imshow("Sign to Speech", frame)
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC to quit
-        break
+                # Add new word to sentence
+                if gesture_text and (gesture_text != last_word or (time.time() - last_time > delay)):
+                    if len(sentence) < MAX_WORDS:
+                        sentence.append(gesture_text)
+                    last_word = gesture_text
+                    last_time = time.time()
 
-cap.release()
-cv2.destroyAllWindows()
+        # Display info on frame
+        cv2.putText(image, "Word: " + (gesture_text if gesture_text else ""), (10,30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+        cv2.putText(image, "Sentence: " + " ".join(sentence), (10,70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+
+        return image
+
+# ---------------------
+# Streamlit UI
+# ---------------------
+st.title("Sign-to-Speech Web App (Up to 4 Words)")
+
+webrtc_streamer(key="sign-speech", video_transformer_factory=SignSpeechTransformer)
+
+if st.button("Speak Sentence"):
+    speak_text(" ".join(sentence))
+    sentence = []
