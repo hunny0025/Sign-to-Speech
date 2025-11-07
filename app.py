@@ -1,5 +1,3 @@
-# app.py
-
 import cv2
 import mediapipe as mp
 import time
@@ -9,7 +7,7 @@ import os
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # ---------------------
-# Speech function using gTTS
+# Speech function
 # ---------------------
 def speak_text(text):
     if text:
@@ -20,7 +18,7 @@ def speak_text(text):
         os.remove("speech.mp3")
 
 # ---------------------
-# Gesture recognition setup
+# Gesture setup
 # ---------------------
 FINGER_TIPS = [4, 8, 12, 16, 20]
 MAX_WORDS = 4
@@ -60,7 +58,7 @@ mp_draw = mp.solutions.drawing_utils
 hands = mp_hands.Hands(max_num_hands=1)
 
 # ---------------------
-# Helper: Detect fingers up
+# Detect fingers
 # ---------------------
 def fingers_up(hand_landmarks):
     tips = [hand_landmarks.landmark[i] for i in FINGER_TIPS]
@@ -73,7 +71,7 @@ def fingers_up(hand_landmarks):
     return fingers
 
 # ---------------------
-# Streamlit video transformer
+# Video Transformer
 # ---------------------
 class SignSpeechTransformer(VideoTransformerBase):
     def transform(self, frame):
@@ -89,14 +87,13 @@ class SignSpeechTransformer(VideoTransformerBase):
                 fingers = tuple(fingers_up(handLms))
                 gesture_text = GESTURES.get(fingers, "")
 
-                # Add new word to sentence
                 if gesture_text and (gesture_text != last_word or (time.time() - last_time > delay)):
                     if len(sentence) < MAX_WORDS:
                         sentence.append(gesture_text)
                     last_word = gesture_text
                     last_time = time.time()
 
-        # Display info on frame
+        # Show info
         cv2.putText(image, "Word: " + (gesture_text if gesture_text else ""), (10,30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
         cv2.putText(image, "Sentence: " + " ".join(sentence), (10,70),
@@ -108,7 +105,6 @@ class SignSpeechTransformer(VideoTransformerBase):
 # Streamlit UI
 # ---------------------
 st.title("Sign-to-Speech Web App (Up to 4 Words)")
-
 webrtc_streamer(key="sign-speech", video_transformer_factory=SignSpeechTransformer)
 
 if st.button("Speak Sentence"):
